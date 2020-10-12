@@ -18,6 +18,24 @@ from subprocess import run
 
 import toml
 
+def onerror(func, path, exc_info):
+    """
+    Error handler for ``shutil.rmtree``.
+
+    If the error is due to an access error (read only file)
+    it attempts to add write permission and then retries.
+
+    If the error is for another reason it re-raises the error.
+
+    Usage : ``shutil.rmtree(path, onerror=onerror)``
+    """
+    import stat
+    if not os.access(path, os.W_OK):
+        # Is the error an access error ?
+        os.chmod(path, stat.S_IWUSR)
+        func(path)
+    else:
+        raise
 
 def main(base_url):
     while base_url.endswith('/'):
@@ -29,7 +47,7 @@ def main(base_url):
     public_dir = os.path.join(base_dir, 'public')
 
     if os.path.exists(public_dir):
-        shutil.rmtree(public_dir)
+        shutil.rmtree(public_dir, ignore_errors=False, onerror=onerror)
 
     os.makedirs(public_dir)
     os.chdir(public_dir)
@@ -66,7 +84,12 @@ def main(base_url):
             flags=ext.get('flags', []),
             dock_icon=ext.get('dock_icon', {}),
             layerable=ext.get('layerable', None),
+            deletion_warning=ext.get('deletion_warning', None),
         )
+
+        # mfa-link (2FA manager) has no expiration
+        if ext.get('no_expire', False):
+            extension.pop('valid_until', None)
 
         # Strip empty values
         extension = {k: v for k, v in extension.items() if v}
@@ -81,7 +104,7 @@ def main(base_url):
             '--depth', '1',
             'https://github.com/{github}.git'.format(**ext),
         ])
-        shutil.rmtree(os.path.join(public_dir, repo_name, '.git'))
+        shutil.rmtree(os.path.join(public_dir, repo_name, '.git'), ignore_errors=False, onerror=onerror)
 
         # Generate JSON file for each extension
         with open(os.path.join(public_dir, repo_name, 'index.json'), 'w') as wf:
@@ -108,7 +131,7 @@ def main(base_url):
     for filename in ['README.md', 'Gruntfile.js', '.babelrc', 'package.json', '*.map', 'src', 'vendor']:
         for matched_fpath in glob.glob(f'public/*/{filename}'):
             if os.path.isdir(matched_fpath):
-                shutil.rmtree(matched_fpath)
+                shutil.rmtree(matched_fpath, ignore_errors=False, onerror=onerror)
             elif os.path.isfile(matched_fpath):
                 os.remove(matched_fpath)
             else:
